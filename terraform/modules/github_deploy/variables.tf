@@ -6,6 +6,14 @@ variable "github_repository" {
   type = string
 }
 
+variable "github_repository_owner_id" {
+  type = string
+}
+
+variable "github_repository_id" {
+  type = string
+}
+
 variable "create_oidc_provider" {
   type = bool
 }

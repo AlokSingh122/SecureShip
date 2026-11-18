@@ -18,11 +18,13 @@ module "ec2" {
 }
 
 module "github_deploy" {
-  source               = "./modules/github_deploy"
-  project_name         = var.project_name
-  github_repository    = var.github_repository
-  create_oidc_provider = var.create_github_oidc_provider
-  aws_region           = var.aws_region
-  ecr_repository_arn   = module.ecr.repository_arn
-  ec2_instance_arn     = module.ec2.instance_arn
+  source                     = "./modules/github_deploy"
+  project_name               = var.project_name
+  github_repository          = var.github_repository
+  github_repository_owner_id = var.github_repository_owner_id
+  github_repository_id       = var.github_repository_id
+  create_oidc_provider       = var.create_github_oidc_provider
+  aws_region                 = var.aws_region
+  ecr_repository_arn         = module.ecr.repository_arn
+  ec2_instance_arn           = module.ec2.instance_arn
 }

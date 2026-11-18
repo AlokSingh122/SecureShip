@@ -139,10 +139,12 @@ terraform -chdir=terraform init `
 Copy-Item terraform\example.tfvars terraform\terraform.tfvars
 ```
 
-Set `github_repository` in `terraform/terraform.tfvars`. Optionally narrow
-`allowed_http_cidr` to your own IPv4 CIDR; GitHub-hosted runners also need to reach port
-80 for the workflow smoke test, so use a runner with a permitted egress IP if narrowing
-this value.
+Set `github_repository`, `github_repository_owner_id`, and `github_repository_id` in
+`terraform/terraform.tfvars`. GitHub repositories created after July 15, 2026 use
+immutable IDs in OIDC subjects; obtain the IDs from the repository API at
+`https://api.github.com/repos/OWNER/REPOSITORY`. Optionally narrow `allowed_http_cidr` to
+your own IPv4 CIDR; GitHub-hosted runners also need to reach port 80 for the workflow
+smoke test, so use a runner with a permitted egress IP if narrowing this value.
 
 Review the architecture transition before applying:
 

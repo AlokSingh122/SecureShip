@@ -30,7 +30,9 @@ data "aws_iam_policy_document" "trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:production"]
+      values = [
+        "repo:${split("/", var.github_repository)[0]}@${var.github_repository_owner_id}/${split("/", var.github_repository)[1]}@${var.github_repository_id}:environment:production"
+      ]
     }
   }
 }

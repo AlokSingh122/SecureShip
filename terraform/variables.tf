@@ -20,6 +20,26 @@ variable "github_repository" {
   }
 }
 
+variable "github_repository_owner_id" {
+  description = "Immutable numeric GitHub owner ID used in the OIDC subject."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_owner_id))
+    error_message = "github_repository_owner_id must contain only digits."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable numeric GitHub repository ID used in the OIDC subject."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must contain only digits."
+  }
+}
+
 variable "create_github_oidc_provider" {
   description = "Set false if this AWS account already has the GitHub OIDC provider."
   type        = bool
