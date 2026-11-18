@@ -87,6 +87,8 @@ All other Checkov failures remain blocking.
 ## Local checks
 
 Requirements: Python 3.11+, Terraform 1.10+, and Docker.
+FastAPI and Starlette are pinned together in `app/requirements.txt`; validate their
+compatibility and run the application tests when updating either dependency.
 
 ```powershell
 python -m pip install -r requirements-dev.txt -r app/requirements.txt

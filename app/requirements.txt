@@ -1,5 +1,7 @@
 # Runtime dependencies only. These are what Trivy scans (trivy fs) and what ships in the image.
 # Direct dependencies are pinned. Transitive dependencies resolve at build time:
 # Transitive dependencies resolve at build time; keep this list small for the sample app.
-fastapi==0.115.6
+# Keep FastAPI and Starlette pinned to a compatible, security-fixed pair.
+fastapi==0.163.2
+starlette==1.10.0
 uvicorn==0.34.0
