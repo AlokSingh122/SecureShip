@@ -1,0 +1,212 @@
+name: SecureShip CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: secure-pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  TRIVY_IMAGE: aquasec/trivy:0.58.1
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.21.2
+  CHECKOV_IMAGE: bridgecrew/checkov:3.2.392
+
+jobs:
+  scan:
+    name: Test and scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            app/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt -r app/requirements.txt
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Create scan output directory
+        run: mkdir -p reports
+
+      - name: Scan secrets with Gitleaks
+        run: |
+          docker run --rm \
+            -v "$PWD:/scan:ro" -v "$PWD/reports:/reports" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0='*' \
+            "$GITLEAKS_IMAGE" detect --source /scan \
+            --report-format json --report-path /reports/gitleaks.json \
+            --redact --exit-code 0 --no-banner
+
+      - name: Scan Python dependencies with Trivy
+        run: |
+          docker run --rm \
+            -v "$PWD/app:/scan:ro" -v "$PWD/reports:/reports" \
+            "$TRIVY_IMAGE" fs --scanners vuln --format json \
+            --output /reports/trivy-fs.json --exit-code 0 --timeout 10m /scan
+
+      - name: Build and scan container image with Trivy
+        run: |
+          docker build -f docker/Dockerfile -t secureship:scan --build-arg GIT_SHA="$GITHUB_SHA" .
+          docker save -o reports/image.tar secureship:scan
+          docker run --rm -v "$PWD/reports:/reports" \
+            "$TRIVY_IMAGE" image --input /reports/image.tar --scanners vuln \
+            --format json --output /reports/trivy-image.json --exit-code 0 --timeout 10m
+
+      - name: Scan Terraform with Checkov
+        run: |
+          docker run --rm -v "$PWD/terraform:/scan:ro" -v "$PWD/reports:/reports" \
+            "$CHECKOV_IMAGE" -d /scan --framework terraform \
+            --download-external-modules false --output json \
+            --output-file-path /reports --soft-fail
+          mv reports/results_json.json reports/checkov.json
+
+      - name: Evaluate security policy
+        run: >
+          python security/policy_engine.py
+          --policy security/policy.yaml
+          --trivy-fs reports/trivy-fs.json
+          --trivy-image reports/trivy-image.json
+          --gitleaks reports/gitleaks.json
+          --checkov reports/checkov.json
+          --output reports/policy-decision.json
+
+      - name: Upload approved image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: approved-image
+          path: reports/image.tar
+          retention-days: 1
+
+  deploy:
+    name: Publish to ECR and deploy to EC2
+    needs: scan
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: approved-image
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push the scanned image
+        id: push
+        env:
+          REGISTRY: ${{ steps.login.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; reusing the immutable image."
+          else
+            docker load -i image.tar
+            docker tag secureship:scan "$REGISTRY/$REPOSITORY:$TAG"
+            docker push "$REGISTRY/$REPOSITORY:$TAG"
+          fi
+          DIGEST=$(aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "image_uri=$REGISTRY/$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy approved digest through Systems Manager
+        env:
+          IMAGE_URI: ${{ steps.push.outputs.image_uri }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          ECR_REGISTRY: ${{ steps.login.outputs.registry }}
+          EC2_LOG_GROUP: ${{ vars.EC2_LOG_GROUP }}
+        run: |
+          set -euo pipefail
+          test -n "$EC2_INSTANCE_ID"
+          test -n "$EC2_LOG_GROUP"
+          for attempt in {1..36}; do
+            PING_STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" \
+              --query 'InstanceInformationList[0].PingStatus' --output text)
+            if [ "$PING_STATUS" = "Online" ]; then break; fi
+            sleep 10
+          done
+          test "$PING_STATUS" = "Online"
+          jq -n \
+            --arg region "$AWS_REGION" \
+            --arg registry "$ECR_REGISTRY" \
+            --arg image "$IMAGE_URI" \
+            --arg log_group "$EC2_LOG_GROUP" \
+            '{
+              commands: [
+                "set -eu",
+                "aws ecr get-login-password --region \($region) | docker login --username AWS --password-stdin \($registry)",
+                "docker pull \"\($image)\"",
+                "if docker container inspect secureship >/dev/null 2>&1; then docker rm -f secureship; fi",
+                "docker run --detach --name secureship --restart unless-stopped --log-driver awslogs --log-opt awslogs-region=\($region) --log-opt awslogs-group=\($log_group) --log-opt awslogs-stream=secureship-$(date +%s) --publish 80:8000 \"\($image)\"",
+                "attempt=0; while [ \"$attempt\" -lt 30 ]; do if curl --fail --silent --show-error http://127.0.0.1/health; then exit 0; fi; attempt=$((attempt + 1)); sleep 2; done; exit 1"
+              ]
+            }' > ssm-parameters.json
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "Deploy SecureShip image $IMAGE_URI" \
+            --timeout-seconds 300 \
+            --parameters file://ssm-parameters.json \
+            --query 'Command.CommandId' --output text)
+          if ! aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID"; then
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --output json
+            exit 1
+          fi
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query '{Status:Status,Output:StandardOutputContent}' \
+            --output json
+
+      - name: Verify live application health and version
+        env:
+          EC2_PUBLIC_IP: ${{ vars.EC2_PUBLIC_IP }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$EC2_PUBLIC_IP"
+          APP_URL="http://$EC2_PUBLIC_IP"
+          curl --fail --show-error --silent --retry 12 --retry-delay 10 \
+            --retry-all-errors "$APP_URL/health"
+          curl --fail --show-error --silent --retry 12 --retry-delay 10 \
+            --retry-all-errors "$APP_URL/version" |
+            jq --exit-status --arg sha "$GITHUB_SHA" '.git_sha == $sha'

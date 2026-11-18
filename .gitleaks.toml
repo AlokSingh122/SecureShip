@@ -1,0 +1,7 @@
+# Gitleaks configuration: start from the maintained default ruleset.
+# Do NOT add allowlist entries to make a pipeline pass. A real exception needs a
+# reviewed entry here with a comment explaining why it is a false positive.
+title = "SecureShip gitleaks config"
+
+[extend]
+useDefault = true

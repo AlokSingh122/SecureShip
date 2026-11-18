@@ -1,0 +1,94 @@
+# SecureShip security policy. Evaluated by security/policy_engine.py.
+# Changes to this file are security changes: review them like code.
+version: 1
+
+trivy:
+  # Findings at these severities block the pipeline.
+  fail_on_severity: [CRITICAL, HIGH]
+  # Ignore vulnerabilities with no upstream fix yet (nothing actionable to do).
+  # They are still counted and shown in the report.
+  ignore_unfixed: true
+
+gitleaks:
+  # Any detected secret blocks the pipeline. There is no severity scale for secrets.
+  fail_on_any: true
+
+checkov:
+  # Open-source Checkov findings carry no severity, so any failed check blocks.
+  fail_on_any: true
+
+# Intentional learning-environment tradeoffs. All waivers are scoped and expire.
+exceptions:
+  - id: EXC-EC2-HTTP-001
+    tool: checkov
+    finding_id: CKV_AWS_260
+    target: module.ec2.aws_security_group.app
+    reason: >-
+      Public HTTP on port 80 is an explicit requirement for this non-sensitive demo.
+    compensating_control: >-
+      The ingress CIDR is configurable and should be narrowed where possible;
+      the instance has no SSH ingress and exposes only the application port.
+    owner: aayush
+    expires: 2027-11-18
+
+  - id: EXC-EC2-LOG-KMS-001
+    tool: checkov
+    finding_id: CKV_AWS_158
+    target: module.ec2.aws_cloudwatch_log_group.app
+    reason: >-
+      The demo logs do not contain sensitive data; a customer-managed KMS key
+      would add recurring cost for this learning environment.
+    compensating_control: >-
+      CloudWatch Logs default at-rest encryption remains enabled and retention is
+      limited to 14 days.
+    owner: aayush
+    expires: 2027-11-18
+
+  - id: EXC-EC2-LOG-RETENTION-001
+    tool: checkov
+    finding_id: CKV_AWS_338
+    target: module.ec2.aws_cloudwatch_log_group.app
+    reason: >-
+      One-year retention is unnecessary for a learning instance and increases
+      log-storage cost.
+    compensating_control: >-
+      Logs are retained for 14 days, sufficient for short-term troubleshooting.
+    owner: aayush
+    expires: 2027-11-18
+
+  - id: EXC-EC2-MONITORING-001
+    tool: checkov
+    finding_id: CKV_AWS_126
+    target: module.ec2.aws_instance.app
+    reason: >-
+      Detailed EC2 monitoring has additional per-instance charges and is not
+      required for this single-instance demonstration.
+    compensating_control: >-
+      Basic EC2 metrics and application health checks remain available.
+    owner: aayush
+    expires: 2027-11-18
+
+  - id: EXC-EC2-PUBLIC-IP-001
+    tool: checkov
+    finding_id: CKV_AWS_88
+    target: module.ec2.aws_instance.app
+    reason: >-
+      A public IPv4 address is required for direct HTTP access without a
+      load balancer or NAT Gateway.
+    compensating_control: >-
+      Security group ingress is limited to configurable TCP/80; no SSH rule
+      exists. IMDSv2 is required.
+    owner: aayush
+    expires: 2027-11-18
+
+  - id: EXC-ECR-KMS-001
+    tool: checkov
+    finding_id: CKV_AWS_136
+    target: module.ecr.aws_ecr_repository.app
+    reason: >-
+      ECR uses AES256 server-side encryption; a customer-managed KMS key would
+      add key and request costs to this learning project.
+    compensating_control: >-
+      Images are encrypted at rest and repository access is restricted by IAM.
+    owner: aayush
+    expires: 2027-11-18
