@@ -92,3 +92,18 @@ exceptions:
       Images are encrypted at rest and repository access is restricted by IAM.
     owner: aayush
     expires: 2027-11-18
+
+  - id: EXC-TRIVY-SETUPTOOLS-SBOM-001
+    tool: trivy
+    finding_id: CVE-2025-47273
+    target: setuptools@70.3.0
+    reason: >-
+      Trivy 0.76.2 reports this setuptools package without a file location. The
+      runtime installs no setuptools distribution, and a scan of its flattened
+      filesystem reports no vulnerabilities. Reassess and remove this exception
+      if the image analyzer's package record changes.
+    compensating_control: >-
+      The image is scanned on every build, all other CRITICAL/HIGH and UNKNOWN
+      findings remain blocking, and this exception expires after 30 days.
+    owner: AlokSingh122
+    expires: 2026-12-18

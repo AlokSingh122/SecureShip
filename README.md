@@ -83,12 +83,18 @@ document. SSH is not required.
 The policy contains expiring Checkov exceptions only for the required public HTTP/public
 IPv4 path and the learning environment's log encryption/retention/monitoring cost choices.
 All other Checkov failures remain blocking.
+The Trivy policy also contains a 30-day exception for a locationless
+`setuptools@70.3.0` image finding; the runtime has no setuptools distribution, and a
+filesystem scan of the flattened runtime reported no vulnerabilities. Reassess it before
+expiry rather than extending it automatically.
 
 ## Local checks
 
 Requirements: Python 3.11+, Terraform 1.10+, and Docker.
 FastAPI and Starlette are pinned together in `app/requirements.txt`; validate their
 compatibility and run the application tests when updating either dependency.
+CI and the container use Python 3.14. The image uses digest-pinned Alpine 3.24,
+upgrades its OS packages during the build, and pins pip to 26.3.
 
 ```powershell
 python -m pip install -r requirements-dev.txt -r app/requirements.txt

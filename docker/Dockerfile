@@ -1,33 +1,31 @@
 # syntax=docker/dockerfile:1
 # Build from the repository root:  docker build -f docker/Dockerfile -t secureship:local .
 
-# ---- Stage 1: build dependencies in an isolated virtualenv ----
-FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
-ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-WORKDIR /build
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-COPY app/requirements.txt .
-RUN pip install -r requirements.txt
-
-# ---- Stage 2: minimal runtime image ----
-FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 ARG GIT_SHA=unknown
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH" \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     GIT_SHA=${GIT_SHA}
 
-# Apply available OS security fixes, then drop package lists (smaller image, fewer CVEs).
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk update \
+    && apk upgrade --no-cache \
+    && apk add --no-cache python3 py3-pip \
+    && rm -rf /var/cache/apk/*
 
-# Dedicated unprivileged user with a numeric UID (required for non-root checks by some platforms).
-RUN groupadd --system --gid 10001 app \
-    && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
+RUN python3 -m venv --without-pip /opt/venv \
+    && python3 -m pip --python /opt/venv install --upgrade pip==26.3
+ENV PATH="/opt/venv/bin:$PATH"
 
-COPY --from=builder /opt/venv /opt/venv
+WORKDIR /build
+COPY app/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
+RUN addgroup -S -g 10001 app \
+    && adduser -S -u 10001 -G app -H -s /sbin/nologin app
+
 WORKDIR /srv
 COPY app/ /srv/app/
 
