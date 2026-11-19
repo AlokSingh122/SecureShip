@@ -51,7 +51,9 @@ data "aws_iam_policy_document" "permissions" {
 
   statement {
     actions = [
+      "ecr:BatchGetImage",
       "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
       "ecr:CompleteLayerUpload",
       "ecr:DescribeImages",
       "ecr:InitiateLayerUpload",
