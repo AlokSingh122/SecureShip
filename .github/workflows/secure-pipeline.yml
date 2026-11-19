@@ -178,7 +178,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name AWS-RunShellScript \
-            --comment "Deploy SecureShip image $IMAGE_URI" \
+            --comment "SecureShip deployment" \
             --timeout-seconds 300 \
             --parameters file://ssm-parameters.json \
             --query 'Command.CommandId' --output text)
